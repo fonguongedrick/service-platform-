@@ -1,0 +1,1 @@
+/home/nkwain-blaise-ngam/StudioProjects/service-platform-/build/app/intermediates/cxx/Debug/27b111z4/obj/arm64-v8a
