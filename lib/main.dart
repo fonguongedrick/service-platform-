@@ -1,8 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
-void main() {
-  runApp(const ServicePlatformApp());
+
+void main() async{
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    
+  );
+    
+  runApp( ServicePlatformApp());
 }
 
 class ServicePlatformApp extends StatelessWidget {
@@ -95,19 +104,20 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     {
       'title': 'Find Local Services',
       'description': 'Discover skilled professionals near you',
-      'image': 'assets/images/onboarding1.png',
+      'image': 'https://images.unsplash.com/photo-1581091012184-7f636a26b287?fit=crop&w=800&q=80',
     },
     {
       'title': 'Book Instantly',
       'description': 'Schedule appointments with just a few taps',
-      'image': 'assets/images/onboarding2.png',
+      'image': 'https://images.unsplash.com/photo-1591012911200-2c912dcd52c5?fit=crop&w=800&q=80',
     },
     {
       'title': 'Secure Payments',
       'description': 'Pay safely through our secure platform',
-      'image': 'assets/images/onboarding3.png',
+      'image': 'https://images.unsplash.com/photo-1605902711622-cfb43c4437d3?fit=crop&w=800&q=80',
     },
   ];
+
 
   Future<void> _completeOnboarding() async {
     final prefs = await SharedPreferences.getInstance();
@@ -205,7 +215,7 @@ class OnboardingPage extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Image.asset(image, height: 250),
+          Image.network(image, height: 250),
           const SizedBox(height: 40),
           Text(
             title,
@@ -240,6 +250,7 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController(); // NEW
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
@@ -250,20 +261,70 @@ class _AuthScreenState extends State<AuthScreen> {
 
     setState(() => _isLoading = true);
 
+    final auth = FirebaseAuth.instance;
+    final firestore = FirebaseFirestore.instance;
+
     try {
-      // Simulate authentication process
-      await Future.delayed(const Duration(seconds: 1));
+      UserCredential userCredential;
+
+      if (widget.isLogin) {
+        // LOGIN
+        userCredential = await auth.signInWithEmailAndPassword(
+          email: _emailController.text.trim(),
+          password: _passwordController.text.trim(),
+        );
+      } else {
+        // SIGN UP
+        userCredential = await auth.createUserWithEmailAndPassword(
+          email: _emailController.text.trim(),
+          password: _passwordController.text.trim(),
+        );
+
+        // Save user data to Firestore
+        await firestore.collection('users').doc(userCredential.user!.uid).set({
+          'uid': userCredential.user!.uid,
+          'name': _nameController.text.trim(),
+          'email': _emailController.text.trim(),
+          'createdAt': Timestamp.now(),
+        });
+      }
 
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (context) => const MainNavigationScreen()),
       );
+    } on FirebaseAuthException catch (e) {
+      String errorMessage = 'Authentication failed';
+      switch (e.code) {
+        case 'user-not-found':
+          errorMessage = 'No user found with this email.';
+          break;
+        case 'wrong-password':
+          errorMessage = 'Incorrect password.';
+          break;
+        case 'email-already-in-use':
+          errorMessage = 'Email already in use.';
+          break;
+        case 'weak-password':
+          errorMessage = 'Password is too weak.';
+          break;
+        case 'invalid-email':
+          errorMessage = 'Invalid email address.';
+          break;
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(errorMessage)),
+        );
+      }
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('An error occurred: ${e.toString()}')),
+        );
+      }
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -292,7 +353,7 @@ class _AuthScreenState extends State<AuthScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Image.asset('assets/images/auth.png', height: 200),
+                  Image.asset('assets/images/auth.jpg', height: 200),
                   const SizedBox(height: 30),
                   Text(
                     widget.isLogin ? 'Welcome Back' : 'Create Account',
@@ -303,6 +364,25 @@ class _AuthScreenState extends State<AuthScreen> {
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 30),
+
+                  // Name field (only for sign up)
+                  if (!widget.isLogin)
+                    TextFormField(
+                      controller: _nameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Name',
+                        prefixIcon: Icon(Icons.person),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter your name';
+                        }
+                        return null;
+                      },
+                    ),
+
+                  if (!widget.isLogin) const SizedBox(height: 20),
+
                   TextFormField(
                     controller: _emailController,
                     decoration: const InputDecoration(
@@ -338,6 +418,7 @@ class _AuthScreenState extends State<AuthScreen> {
                       return null;
                     },
                   ),
+
                   if (!widget.isLogin) ...[
                     const SizedBox(height: 20),
                     TextFormField(
@@ -355,11 +436,19 @@ class _AuthScreenState extends State<AuthScreen> {
                       },
                     ),
                   ],
+
                   const SizedBox(height: 30),
                   ElevatedButton(
                     onPressed: _isLoading ? null : _submit,
                     child: _isLoading
-                        ? const CircularProgressIndicator()
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
                         : Text(widget.isLogin ? 'Login' : 'Sign Up'),
                   ),
                   TextButton(
@@ -381,6 +470,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
   @override
   void dispose() {
+    _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
@@ -1883,9 +1973,27 @@ class BookingsScreen extends StatelessWidget {
   }
 }
 
-// Profile Screen
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
+
+  Future<Map<String, dynamic>?> _fetchUserData() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return null;
+
+    final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    return doc.data();
+  }
+
+  void _logout(BuildContext context) async {
+    await FirebaseAuth.instance.signOut();
+    if (context.mounted) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const AuthScreen()),
+        (route) => false,
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1893,63 +2001,79 @@ class ProfileScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('My Profile'),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            const CircleAvatar(
-              radius: 50,
-              backgroundImage: AssetImage('assets/images/user.png'),
+      body: FutureBuilder<Map<String, dynamic>?>(
+        future: _fetchUserData(),
+        builder: (context, snapshot) {
+          final user = FirebaseAuth.instance.currentUser;
+          final email = user?.email ?? '';
+
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final data = snapshot.data;
+          final name = data?['name'] ?? 'No Name';
+
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                const CircleAvatar(
+                  radius: 50,
+                  backgroundImage: NetworkImage('https://www.w3schools.com/howto/img_avatar.png'),
+
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  name,
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  email,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    color: Colors.grey,
+                  ),
+                ),
+                const SizedBox(height: 32),
+                _ProfileMenuItem(
+                  icon: Icons.history,
+                  title: 'Booking History',
+                  onTap: () {},
+                ),
+                const Divider(),
+                _ProfileMenuItem(
+                  icon: Icons.favorite,
+                  title: 'Favorites',
+                  onTap: () {},
+                ),
+                const Divider(),
+                _ProfileMenuItem(
+                  icon: Icons.settings,
+                  title: 'Settings',
+                  onTap: () {},
+                ),
+                const Divider(),
+                _ProfileMenuItem(
+                  icon: Icons.help,
+                  title: 'Help & Support',
+                  onTap: () {},
+                ),
+                const Divider(),
+                _ProfileMenuItem(
+                  icon: Icons.logout,
+                  title: 'Logout',
+                  color: Colors.red,
+                  onTap: () => _logout(context),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-            const Text(
-              'John Doe',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              '+237 6XX XXX XXX',
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.grey,
-              ),
-            ),
-            const SizedBox(height: 32),
-            _ProfileMenuItem(
-              icon: Icons.history,
-              title: 'Booking History',
-              onTap: () {},
-            ),
-            const Divider(),
-            _ProfileMenuItem(
-              icon: Icons.favorite,
-              title: 'Favorites',
-              onTap: () {},
-            ),
-            const Divider(),
-            _ProfileMenuItem(
-              icon: Icons.settings,
-              title: 'Settings',
-              onTap: () {},
-            ),
-            const Divider(),
-            _ProfileMenuItem(
-              icon: Icons.help,
-              title: 'Help & Support',
-              onTap: () {},
-            ),
-            const Divider(),
-            _ProfileMenuItem(
-              icon: Icons.logout,
-              title: 'Logout',
-              color: Colors.red,
-              onTap: () {},
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
@@ -1964,22 +2088,27 @@ class _ProfileMenuItem extends StatelessWidget {
   const _ProfileMenuItem({
     required this.icon,
     required this.title,
-    this.color,
     required this.onTap,
+    this.color,
   });
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: Icon(icon, color: color),
+      leading: Icon(icon, color: color ?? Colors.black),
       title: Text(
         title,
-        style: TextStyle(color: color),
+        style: TextStyle(
+          color: color ?? Colors.black,
+          fontWeight: FontWeight.w500,
+        ),
       ),
       onTap: onTap,
     );
   }
 }
+
+
 
 // Search Delegate
 class ServiceSearchDelegate extends SearchDelegate {
